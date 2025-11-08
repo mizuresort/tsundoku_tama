@@ -1,7 +1,6 @@
-import { Book, GenreKey, characterTemplates } from "./types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea"; // Textarea をインポート
+import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import {
   Dialog,
@@ -17,16 +16,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus } from "lucide-react";
-import React, { useState } from "react";
+import { Plus, ScanLine } from "lucide-react";
+import { useState } from "react";
+import { BarcodeScanner } from "./BarcodeScanner";
+import { fetchBookFromOpenBD } from "@/lib/openbd";
 
-// Add Book Dialog Component
-export default function AddBookDialog({
-  isOpen,
-  onOpenChange,
-  // 💡 onAddBook の引数に reason を追加
-  onAddBook,
-}: {
+interface AddBookDialogProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
   onAddBook: (
@@ -35,19 +30,29 @@ export default function AddBookDialog({
     totalPage: number,
     coverImage: string,
     reason: string
-  ) => Promise<void>; // 💡 Promise<void> に変更
-}) {
+  ) => Promise<void>;
+}
+
+export default function AddBookDialog({
+  isOpen,
+  onOpenChange,
+  onAddBook,
+}: AddBookDialogProps) {
   const [title, setTitle] = useState("");
   const [genre, setGenre] = useState("study");
   const [totalPage, setTotalPage] = useState("300");
   const [coverImage, setCoverImage] = useState("");
-  const [reason, setReason] = useState(""); // ✨ 新規追加: reason の状態
-  const [isLoading, setIsLoading] = useState(false); // 登録中の状態
+  const [reason, setReason] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
+  const [isFetchingBook, setIsFetchingBook] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // 💡 reason も必須チェックに追加
-    if (!title || !totalPage || !reason) return;
+    const pageNum = Number.parseInt(totalPage, 10);
+    if (!title || !totalPage || !reason || isNaN(pageNum) || pageNum <= 0) {
+      return;
+    }
 
     setIsLoading(true);
 
@@ -57,8 +62,7 @@ export default function AddBookDialog({
         title
       )}`;
 
-    // 💡 onAddBook の呼び出し時に reason を渡す
-    await onAddBook(title, genre, Number.parseInt(totalPage), imageUrl, reason);
+    await onAddBook(title, genre, pageNum, imageUrl, reason);
 
     // Reset form
     setTitle("");
@@ -67,7 +71,31 @@ export default function AddBookDialog({
     setCoverImage("");
     setReason("");
     setIsLoading(false);
-    onOpenChange(false); // ダイアログを閉じる
+    onOpenChange(false);
+  };
+
+  const handleBarcodeScan = async (isbn: string) => {
+    setIsFetchingBook(true);
+    try {
+      const bookInfo = await fetchBookFromOpenBD(isbn);
+      if (bookInfo) {
+        setTitle(bookInfo.title);
+        setGenre(bookInfo.genre);
+        if (bookInfo.totalPage > 0) {
+          setTotalPage(bookInfo.totalPage.toString());
+        }
+        if (bookInfo.coverImage) {
+          setCoverImage(bookInfo.coverImage);
+        }
+      } else {
+        alert("本の情報を取得できませんでした。手動で入力してください。");
+      }
+    } catch (error) {
+      console.error("Failed to fetch book info:", error);
+      alert("本の情報の取得に失敗しました。手動で入力してください。");
+    } finally {
+      setIsFetchingBook(false);
+    }
   };
 
   return (
@@ -88,6 +116,26 @@ export default function AddBookDialog({
           </DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-5">
+          {/* バーコード読み取りボタン */}
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setIsScannerOpen(true)}
+              disabled={isLoading || isFetchingBook}
+              className="flex-1"
+            >
+              <ScanLine className="w-4 h-4 mr-2" />
+              バーコードをスキャン
+            </Button>
+          </div>
+
+          {isFetchingBook && (
+            <div className="bg-blue-50 dark:bg-blue-900/50 border border-blue-200 dark:border-blue-800 rounded-lg p-3 text-blue-700 dark:text-blue-300 text-sm">
+              本の情報を取得中...
+            </div>
+          )}
+
           {/* 1. 本のタイトル */}
           <div className="space-y-2">
             <Label
@@ -107,7 +155,7 @@ export default function AddBookDialog({
             />
           </div>
 
-          {/* 2. 購入理由（新規追加） */}
+          {/* 2. 購入理由 */}
           <div className="space-y-2">
             <Label
               htmlFor="reason"
@@ -126,7 +174,7 @@ export default function AddBookDialog({
             />
           </div>
 
-          {/* 3. ジャンル (キャラクター人格の選択) */}
+          {/* 3. ジャンル */}
           <div className="space-y-2">
             <Label
               htmlFor="genre"
@@ -177,7 +225,7 @@ export default function AddBookDialog({
             />
           </div>
 
-          {/* 5. 表紙画像URL (任意) */}
+          {/* 5. 表紙画像URL */}
           <div className="space-y-2">
             <Label
               htmlFor="cover"
@@ -206,6 +254,12 @@ export default function AddBookDialog({
             {isLoading ? "AIメッセージ生成中..." : "本を追加"}
           </Button>
         </form>
+
+        <BarcodeScanner
+          isOpen={isScannerOpen}
+          onClose={() => setIsScannerOpen(false)}
+          onScanSuccess={handleBarcodeScan}
+        />
       </DialogContent>
     </Dialog>
   );
